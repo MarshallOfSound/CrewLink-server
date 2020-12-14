@@ -58,6 +58,7 @@ app.get('/health', (req, res) => {
 	});
 })
 
+const sideCarSockets = new WeakSet();
 
 io.on('connection', (socket: socketIO.Socket) => {
 	connectionCount++;
@@ -93,9 +94,30 @@ io.on('connection', (socket: socketIO.Socket) => {
 		socket.to(code).broadcast.emit('setId', socket.id, id);
 	})
 
+	socket.on('sidecar', () => {
+		if (!code) return;
+		sideCarSockets.add(socket);
+		const allSocketsForCode = io.in(code).sockets;
+		socket.join(`${code}/sidecar`);
+		if (Object.keys(allSocketsForCode).some(k => !sideCarSockets.has(allSocketsForCode[k]))) {
+			// We have a client that can share gamestate
+			socket.to(code).broadcast.emit('share-gamestate');
+		} else {
+			// No active clients that can share gamestate
+			socket.emit('no-gamestate');
+		}
+	});
+
+	socket.on('gamestate', (gamestate: unknown) => {
+		if (!code) return;
+		socket.to(`${code}/sidecar`).broadcast.emit('gamestate', gamestate);
+	})
 
 	socket.on('leave', () => {
-		if (code) socket.leave(code);
+		if (code) {
+			socket.leave(code);
+			socket.leave(`${code}/sidecar`);
+		}
 	})
 
 	socket.on('signal', (signal: Signal) => {
